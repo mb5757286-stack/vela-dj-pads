@@ -3,7 +3,6 @@ name: Build RPK
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -12,22 +11,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Find project (unpack zip if needed)
+        shell: bash
+        run: |
+          set +e
+          echo "=== files in repo root ==="
+          ls -la
+          if [ -f package.json ] && [ -f src/manifest.json ]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            echo "Project is in repo root"
+            exit 0
+          fi
+          mkdir -p _unz
+          found_zip=0
+          for z in ./*.zip; do
+            [ -f "$z" ] || continue
+            found_zip=1
+            echo "Unpacking: $z"
+            unzip -o -q "$z" -d _unz
+            rc=$?
+            if [ $rc -gt 1 ]; then echo "unzip failed with code $rc for $z"; fi
+          done
+          if [ $found_zip -eq 0 ]; then
+            echo "::error::No package.json/src in repo root and no .zip file found. Upload vela-dj-pads.zip (or minimal-test.zip) to the repository root."
+            exit 1
+          fi
+          echo "=== unpacked tree (manifests) ==="
+          find _unz -name manifest.json
+          m=$(find _unz -path '*/src/manifest.json' | awk '{print length, $0}' | sort -n | sed -n 1p | cut -d' ' -f2-)
+          if [ -z "$m" ]; then
+            echo "::error::src/manifest.json not found inside the zip. Zip content:"
+            find _unz | head -50
+            exit 1
+          fi
+          proj=$(dirname "$(dirname "$m")")
+          echo "Project dir: $proj"
+          echo "PROJECT_DIR=$proj" >> "$GITHUB_ENV"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npm install --no-audit --no-fund
 
       - name: Build .rpk
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npm run build
 
       - name: List build output
-        run: ls -la dist
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ls -laR dist
 
       - name: Upload .rpk
         uses: actions/upload-artifact@v4
         with:
-          name: dj-pads-rpk
-          path: dist/*.rpk
+          name: rpk
+          path: ${{ env.PROJECT_DIR }}/dist/*.rpk
           if-no-files-found: error
