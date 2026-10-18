@@ -36,17 +36,37 @@ jobs:
         working-directory: app
         run: npm install --no-audit --no-fund
 
-      - name: Build .rpk
+      - name: Build 3 test variants (A, B, C)
         working-directory: app
-        run: npm run build
+        run: |
+          set -e
+          mkdir -p ../out
+          build() {
+            python3 - "$1" "$2" "$3" <<'PY'
+          import json, sys
+          suffix, name, entry = sys.argv[1:4]
+          m = json.load(open('src/manifest.json'))
+          m['package'] = 'com.mxga.djpads.' + suffix
+          m['name'] = name
+          m['router']['entry'] = entry
+          json.dump(m, open('src/manifest.json', 'w'), indent=2)
+          PY
+            rm -rf dist build
+            npm run build
+            cp dist/*.rpk ../out/
+          }
+          cp src/manifest.json /tmp/manifest.orig
+          build a "DJ A" pages/menu
+          cp /tmp/manifest.orig src/manifest.json
+          build b "DJ B" pages/index
+          cp /tmp/manifest.orig src/manifest.json
+          rm -f src/common/sounds/p_*.mp3 src/common/sounds/l_*.mp3
+          build c "DJ C" pages/index
+          ls -la ../out
 
-      - name: List build output
-        working-directory: app
-        run: ls -laR dist
-
-      - name: Upload .rpk
+      - name: Upload .rpk files
         uses: actions/upload-artifact@v4
         with:
-          name: DJ-Pads-rpk
-          path: app/dist/*.rpk
+          name: DJ-A-B-C
+          path: out/*.rpk
           if-no-files-found: error
